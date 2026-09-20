@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: glpi-asset-mcp
+  labels:
+    app: glpi-asset-mcp
+spec:
+  type: ClusterIP
+  selector:
+    app: glpi-asset-mcp
+  ports:
+    - name: http
+      port: 8000
+      targetPort: http
+

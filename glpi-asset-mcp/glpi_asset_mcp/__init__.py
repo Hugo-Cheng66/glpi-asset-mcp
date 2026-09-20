@@ -1,0 +1,2 @@
+"""GLPI asset MCP server."""
+
