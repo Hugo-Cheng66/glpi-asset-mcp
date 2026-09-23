@@ -4,10 +4,19 @@ import json
 import sys
 import traceback
 from collections.abc import Callable
+from datetime import datetime, timezone
 from typing import Any
 
 from .config import Settings
-from .glpi_client import GlpiClient, normalize_asset
+from .glpi_client import (
+    DEFAULT_AGENT_DATE_FIELDS,
+    DEFAULT_AGENT_VERSION_FIELDS,
+    GlpiClient,
+    find_first_date_value,
+    find_first_text_value,
+    normalize_asset,
+    parse_glpi_datetime,
+)
 from .reports import expand_items, generate_custom_report, generate_report
 
 
@@ -183,6 +192,21 @@ TOOLS = [
         },
     },
     {
+        "name": "glpi_agent_list",
+        "description": "List GLPI Agent computers with hostname, IP, OS, agent version, last inventory time, and health status. Use this for requests such as 'GLPI agent list'.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Optional filter across hostname, IP, OS, version, and status."},
+                "stale_days": {"type": "integer", "minimum": 1, "maximum": 3650, "default": 30},
+                "max_items": {"type": "integer", "minimum": 1, "maximum": 10000, "default": 3000},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
+                "date_fields": {"type": "array", "items": {"type": "string"}},
+                "version_fields": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+    },
+    {
         "name": "glpi_raw_get",
         "description": "Advanced: get one raw GLPI item by itemtype and id.",
         "inputSchema": {
@@ -267,6 +291,7 @@ class McpServer:
             "windows_software_report": self.windows_software_report,
             "custom_asset_report": self.custom_asset_report,
             "agent_health_check": self.agent_health_check,
+            "glpi_agent_list": self.glpi_agent_list,
             "glpi_raw_get": self.glpi_raw_get,
             "asset_inventory_query": self.asset_inventory_query,
             "asset_full_details": self.asset_full_details,
@@ -461,7 +486,71 @@ class McpServer:
             "ok_count": health["ok_count"],
             "stale_count": health["stale_count"],
             "missing_agent_date_count": health["missing_agent_date_count"],
+            "items": health["rows"][:100],
             "report": report,
+        }
+
+    def glpi_agent_list(self, args: dict[str, Any]) -> dict[str, Any]:
+        stale_days = int(args.get("stale_days", 30))
+        date_fields = args.get("date_fields") or DEFAULT_AGENT_DATE_FIELDS
+        version_fields = args.get("version_fields") or DEFAULT_AGENT_VERSION_FIELDS
+        with GlpiClient(self.settings) as client:
+            items = client.complete_inventory("computer", max_items=int(args.get("max_items", 3000)))
+
+        now = datetime.now(timezone.utc)
+        agents: list[dict[str, Any]] = []
+        for item in items:
+            asset = normalize_asset(item)
+            last_seen_raw, date_field = find_first_date_value(item, date_fields)
+            agent_version, version_field = find_first_text_value(item, version_fields)
+            last_seen = parse_glpi_datetime(last_seen_raw)
+            age_days = (now - last_seen).days if last_seen else None
+            status = "unknown"
+            if age_days is not None:
+                status = "stale" if age_days >= stale_days else "active"
+            agents.append({
+                "id": asset["id"],
+                "hostname": asset["name"],
+                "status": status,
+                "ip_addresses": [row["ip"] for row in asset["networks"] if row.get("ip")],
+                "os": asset["operating_system"],
+                "os_family": asset["os_family"],
+                "agent_version": agent_version or "unknown",
+                "last_inventory": last_seen_raw or "unknown",
+                "age_days": age_days,
+                "location": asset["location"],
+                "matched_date_field": date_field or "",
+                "matched_version_field": version_field or "",
+            })
+
+        query = str(args.get("query") or "").casefold()
+        if query:
+            agents = [agent for agent in agents if query in json.dumps(agent, ensure_ascii=False).casefold()]
+        total = len(agents)
+        agents = agents[:int(args.get("limit", 100))]
+        counts = {status: sum(agent["status"] == status for agent in agents) for status in ("active", "stale", "unknown")}
+        lines = [
+            "# GLPI Agent list",
+            "",
+            f"Total matches: {total}; returned: {len(agents)}; active: {counts['active']}; stale: {counts['stale']}; unknown: {counts['unknown']}.",
+            "",
+            "| ID | Hostname | Status | IP address | Operating system | Agent version | Last inventory |",
+            "|---:|---|---|---|---|---|---|",
+        ]
+        for agent in agents:
+            values = [
+                agent["id"], agent["hostname"], agent["status"], ", ".join(agent["ip_addresses"]),
+                agent["os"], agent["agent_version"], agent["last_inventory"],
+            ]
+            lines.append("| " + " | ".join(str(value or "-").replace("|", "\\|") for value in values) + " |")
+        return {
+            "summary": {"total_matches": total, "returned": len(agents), **counts, "stale_threshold_days": stale_days},
+            "agents": agents,
+            "markdown": "\n".join(lines),
+            "notes": [
+                "Status is inferred from the latest GLPI inventory/contact date; it is not a live connection state.",
+                "Unknown version/date means this GLPI deployment did not expose a recognized field. Use asset_field_catalog to discover custom fields.",
+            ],
         }
 
     def glpi_raw_get(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -607,3 +696,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
