@@ -1,6 +1,6 @@
 import unittest
 
-from glpi_asset_mcp.glpi_client import detect_os_family, normalize_asset
+from glpi_asset_mcp.glpi_client import detect_os_family, find_first_text_value, normalize_asset
 from glpi_asset_mcp.server import _asset_report_row, _discover_field_paths, _filter_normalized_assets
 
 
@@ -26,6 +26,7 @@ class InventoryNormalizationTests(unittest.TestCase):
     def test_extracts_full_inventory(self) -> None:
         asset = normalize_asset(SAMPLE)
         self.assertEqual("linux", detect_os_family(SAMPLE))
+        self.assertEqual("Ubuntu Linux 24.04", asset["operating_system"])
         self.assertEqual("10.0.0.42", asset["networks"][0]["ip"])
         self.assertEqual("00:11:22:33:44:55", asset["networks"][0]["mac"])
         self.assertEqual("102400", asset["storage"][0]["total"])
@@ -49,6 +50,15 @@ class InventoryNormalizationTests(unittest.TestCase):
         self.assertIn("_networkports[].ipaddress", paths)
         self.assertIn("softwares[].version", paths)
 
+    def test_finds_nested_agent_version(self) -> None:
+        value, path = find_first_text_value(
+            {"inventory": {"glpi_agent_version": "1.17"}},
+            ["agent_version", "glpi_agent_version"],
+        )
+        self.assertEqual("1.17", value)
+        self.assertEqual("inventory.glpi_agent_version", path)
+
 
 if __name__ == "__main__":
     unittest.main()
+
