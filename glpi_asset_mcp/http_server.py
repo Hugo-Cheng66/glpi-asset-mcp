@@ -96,6 +96,18 @@ def agent_health_check(
     return service.agent_health_check(locals())
 
 
+@mcp.tool(description="List GLPI Agent computers with hostname, IP, OS, agent version, last inventory time, and health status. Use for 'GLPI agent list' requests.")
+def glpi_agent_list(
+    query: str | None = None,
+    stale_days: Annotated[int, Field(ge=1, le=3650)] = 30,
+    max_items: Annotated[int, Field(ge=1, le=10000)] = 3000,
+    limit: Annotated[int, Field(ge=1, le=1000)] = 100,
+    date_fields: list[str] | None = None,
+    version_fields: list[str] | None = None,
+) -> dict:
+    return service.glpi_agent_list(locals())
+
+
 @mcp.tool(description="Advanced: get one raw GLPI item by itemtype and id.")
 def glpi_raw_get(itemtype: str, id: Annotated[int, Field(ge=1)]) -> dict:
     return service.glpi_raw_get(locals())
@@ -180,3 +192,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
