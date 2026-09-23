@@ -207,6 +207,31 @@ class GlpiClient:
             raise RuntimeError(f"Unexpected GLPI response for {itemtype}/{item_id}")
         return response.data
 
+    def get_complete_item(self, asset_type: str, item_id: int) -> dict[str, Any]:
+        itemtype = resolve_asset_type(asset_type)
+        params = {
+            "expand_dropdowns": "true",
+            "with_devices": "true",
+            "with_disks": "true",
+            "with_softwares": "true",
+            "with_networkports": "true",
+            "with_infocoms": "true",
+        }
+        response = self._request("GET", f"/{itemtype}/{item_id}", params=params)
+        if not isinstance(response.data, dict):
+            raise RuntimeError(f"Unexpected GLPI response for {itemtype}/{item_id}")
+        return response.data
+
+    def complete_inventory(self, asset_type: str, *, max_items: int = 3000) -> list[dict[str, Any]]:
+        results: list[dict[str, Any]] = []
+        for item in self.iter_items(asset_type, max_items=max_items):
+            item_id = item.get("id")
+            if not item_id:
+                continue
+            detail = self.get_complete_item(asset_type, int(item_id))
+            results.append({**item, **detail})
+        return results
+
     def windows_software_inventory(self, *, max_computers: int = 3000) -> dict[str, Any]:
         rows: list[dict[str, Any]] = []
         windows_computers: list[dict[str, Any]] = []
@@ -385,6 +410,110 @@ def _asset_search_blob(item: dict[str, Any]) -> str:
 def is_windows_computer(item: dict[str, Any]) -> bool:
     blob = _recursive_text(item).casefold()
     return "windows" in blob or "microsoft windows" in blob
+
+
+def detect_os_family(item: dict[str, Any]) -> str:
+    blob = _recursive_text(item).casefold()
+    if "windows" in blob or "microsoft" in blob:
+        return "windows"
+    linux_markers = ("linux", "ubuntu", "debian", "red hat", "rhel", "centos", "rocky", "alma", "suse")
+    if any(marker in blob for marker in linux_markers):
+        return "linux"
+    return "unknown"
+
+
+def normalize_asset(item: dict[str, Any], asset_type: str = "computer", *, include_raw: bool = False) -> dict[str, Any]:
+    normalized = {
+        "id": item.get("id"),
+        "asset_type": resolve_asset_type(asset_type),
+        "name": item.get("name", ""),
+        "os_family": detect_os_family(item),
+        "serial": item.get("serial", ""),
+        "asset_tag": item.get("otherserial", ""),
+        "uuid": item.get("uuid", ""),
+        "location": _value_to_text(item.get("locations_id")),
+        "status": _value_to_text(item.get("states_id")),
+        "manufacturer": _value_to_text(item.get("manufacturers_id")),
+        "model": _value_to_text(item.get("computermodels_id") or item.get("networkequipmentmodels_id")),
+        "updated": item.get("date_mod", ""),
+        "networks": extract_network_rows(item),
+        "storage": extract_storage_rows(item),
+        "software": extract_software_rows(item),
+    }
+    if include_raw:
+        normalized["raw"] = item
+    return normalized
+
+
+def extract_network_rows(item: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    def visit(value: Any, path: tuple[str, ...]) -> None:
+        if isinstance(value, dict):
+            path_text = " ".join(path).casefold()
+            keys = {str(key).casefold() for key in value}
+            networkish = any(marker in path_text for marker in ("network", "ethernet", "wifi", "ipaddress"))
+            networkish = networkish or bool(keys & {"mac", "ip", "ipaddress", "ip_address"})
+            if networkish:
+                ip = _first_value(value, "ip", "ipaddress", "ip_address", "name") if "ip" in path_text else _first_value(value, "ip", "ipaddress", "ip_address")
+                mac = _first_value(value, "mac", "mac_address")
+                name = _first_value(value, "name", "ifname", "port", "logical_number")
+                if ip or mac:
+                    key = (name, ip, mac)
+                    if key not in seen:
+                        seen.add(key)
+                        rows.append({
+                            "name": name,
+                            "ip": ip,
+                            "mac": mac,
+                            "type": _first_value(value, "instantiation_type", "type"),
+                            "speed": _first_value(value, "speed"),
+                            "vlan": _first_value(value, "vlan", "vlans_id"),
+                        })
+            for key, child in value.items():
+                visit(child, (*path, str(key)))
+        elif isinstance(value, list):
+            for child in value:
+                visit(child, path)
+
+    visit(item, ())
+    return rows
+
+
+def extract_storage_rows(item: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    def visit(value: Any, path: tuple[str, ...]) -> None:
+        if isinstance(value, dict):
+            path_text = " ".join(path).casefold()
+            storageish = any(marker in path_text for marker in ("disk", "harddrive", "volume", "filesystem", "storage"))
+            if storageish:
+                name = _first_value(value, "name", "designation", "device", "mountpoint", "mount_point")
+                total = _first_value(value, "totalsize", "total_size", "capacity", "size")
+                free = _first_value(value, "freesize", "free_size", "free")
+                if name or total or free:
+                    key = (name, total, free)
+                    if key not in seen:
+                        seen.add(key)
+                        rows.append({
+                            "name": name,
+                            "type": _first_value(value, "type", "interfacetypes_id", "filesystems_id"),
+                            "total": total,
+                            "free": free,
+                            "mount": _first_value(value, "mountpoint", "mount_point"),
+                            "filesystem": _first_value(value, "filesystem", "filesystems_id"),
+                            "serial": _first_value(value, "serial"),
+                        })
+            for key, child in value.items():
+                visit(child, (*path, str(key)))
+        elif isinstance(value, list):
+            for child in value:
+                visit(child, path)
+
+    visit(item, ())
+    return rows
 
 
 def extract_software_rows(computer: dict[str, Any]) -> list[dict[str, Any]]:

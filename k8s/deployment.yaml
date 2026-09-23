@@ -38,14 +38,12 @@ spec:
             - name: reports
               mountPath: /app/reports
           readinessProbe:
-            httpGet:
-              path: /readyz
+            tcpSocket:
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
           livenessProbe:
-            httpGet:
-              path: /healthz
+            tcpSocket:
               port: http
             initialDelaySeconds: 10
             periodSeconds: 30

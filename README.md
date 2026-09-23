@@ -23,6 +23,34 @@ The first version is intentionally focused on your current scope:
 | `custom_asset_report` | Export any GLPI item type with user-selected fields. |
 | `agent_health_check` | Find assets with stale or missing agent inventory/contact dates. |
 | `glpi_raw_get` | Advanced raw read for any GLPI item type. |
+| `asset_inventory_query` | Query Windows/Linux computers by text, OS, IP, or installed software. |
+| `asset_full_details` | Return one normalized asset with software, IP/MAC, and storage. |
+| `software_inventory_query` | Search installed software across Windows and Linux computers. |
+| `asset_inventory_report` | Export normalized computer inventory with network, software, and storage summaries. |
+| `network_device_report` | Export network equipment with IP, MAC, model, location, and port summaries. |
+| `asset_field_catalog` | Discover real field paths exposed by the connected GLPI deployment. |
+
+## Natural-language inventory queries
+
+The Streamable HTTP server exposes normalized inventory tools intended for
+questions from Open WebUI such as:
+
+```text
+List Linux machines that have nginx installed.
+Show the IP, MAC, disks, and software for computer 42.
+Which Windows computers have Java 8 installed?
+Export all network devices in the Shanghai location to XLSX.
+```
+
+`asset_inventory_query` returns inline JSON data for chat answers. It accepts
+`query`, `os_family`, `ip`, and `software` filters. `asset_full_details` returns
+a single aggregated view. `asset_inventory_report` and
+`network_device_report` also return the first 20 rows as an inline preview so
+Open WebUI can answer even when the generated file lives in another container.
+
+GLPI versions and plugins expose different nested field names. Call
+`asset_field_catalog` with a representative asset ID to discover the paths
+available in the current deployment before building a custom report.
 
 ## Compatibility
 
@@ -206,7 +234,7 @@ Build the image:
 docker build -t glpi-asset-mcp:0.1.0 .
 ```
 
-Run the HTTP wrapper used by Kubernetes:
+Run the MCP Streamable HTTP server used by Open WebUI and Kubernetes:
 
 ```bash
 docker run --rm -p 8000:8000 \
@@ -217,19 +245,15 @@ docker run --rm -p 8000:8000 \
   glpi-asset-mcp:0.1.0
 ```
 
-Health check:
+The MCP endpoint is:
 
-```bash
-curl http://localhost:8000/healthz
+```text
+http://localhost:8000/mcp
 ```
 
-HTTP JSON-RPC endpoint:
-
-```bash
-curl -X POST http://localhost:8000/mcp \
-  -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
-```
+It uses the official MCP SDK's stateless Streamable HTTP transport with JSON
+responses. Kubernetes and Docker health checks probe the TCP port so they do
+not create MCP sessions.
 
 The original stdio MCP server is still available for desktop MCP hosts:
 
@@ -260,12 +284,28 @@ Port-forward for testing:
 
 ```bash
 kubectl port-forward svc/glpi-asset-mcp 8000:8000
-curl http://localhost:8000/healthz
 ```
 
-Production note: Kubernetes runs the HTTP wrapper (`python -m glpi_asset_mcp.http_server`) because stdio MCP processes are normally launched directly by an MCP host. If your MCP client requires official Streamable HTTP/SSE MCP transport, add that transport layer in front of the same `McpServer` handler.
+Then configure an MCP client with `http://localhost:8000/mcp`.
+
+Production note: Kubernetes runs the official Streamable HTTP transport
+(`python -m glpi_asset_mcp.http_server`). The original stdio server remains
+available for desktop MCP hosts.
 
 ## Open WebUI / MCP Host
+
+Open WebUI 0.6.31 or newer can connect directly:
+
+```text
+Settings > Admin > Integrations > External Tool Servers
+Type: MCP (Streamable HTTP)
+URL: http://glpi-asset-mcp:8000/mcp
+Auth: None (or configure authentication at your reverse proxy)
+```
+
+When Open WebUI and this server run in the same Docker or Kubernetes network,
+use the service name instead of `localhost`. Do not expose the unauthenticated
+MCP endpoint directly to the public Internet.
 
 Configure your MCP host to run the server over stdio:
 

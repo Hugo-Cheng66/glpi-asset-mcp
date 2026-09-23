@@ -7,7 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from .config import Settings
-from .glpi_client import GlpiClient
+from .glpi_client import GlpiClient, normalize_asset
 from .reports import expand_items, generate_custom_report, generate_report
 
 
@@ -196,6 +196,63 @@ TOOLS = [
     },
 ]
 
+TOOLS.extend([
+    {
+        "name": "asset_inventory_query",
+        "description": "Query normalized Windows/Linux assets by name, text, IP, software, or OS family.",
+        "inputSchema": {"type": "object", "properties": {
+            "query": {"type": "string"}, "os_family": {"type": "string", "enum": ["windows", "linux", "unknown"]},
+            "ip": {"type": "string"}, "software": {"type": "string"},
+            "max_items": {"type": "integer", "minimum": 1, "maximum": 10000, "default": 3000},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
+        }},
+    },
+    {
+        "name": "asset_full_details",
+        "description": "Get a normalized complete asset view including software, IP/MAC, and storage.",
+        "inputSchema": {"type": "object", "required": ["id"], "properties": {
+            "id": {"type": "integer", "minimum": 1},
+            "asset_type": {"type": "string", "enum": ["computer", "network_device"], "default": "computer"},
+            "include_raw": {"type": "boolean", "default": False},
+        }},
+    },
+    {
+        "name": "software_inventory_query",
+        "description": "Find Windows or Linux machines and installed software by software name/version or machine text.",
+        "inputSchema": {"type": "object", "properties": {
+            "query": {"type": "string"}, "computer_query": {"type": "string"},
+            "os_family": {"type": "string", "enum": ["windows", "linux", "unknown"]},
+            "max_computers": {"type": "integer", "minimum": 1, "maximum": 10000, "default": 3000},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 5000, "default": 500},
+        }},
+    },
+    {
+        "name": "asset_inventory_report",
+        "description": "Export normalized computer inventory with OS, IP, MAC, software, and storage summaries.",
+        "inputSchema": {"type": "object", "properties": {
+            "query": {"type": "string"}, "os_family": {"type": "string", "enum": ["windows", "linux", "unknown"]},
+            "format": {"type": "string", "enum": ["csv", "xlsx"], "default": "xlsx"},
+            "max_items": {"type": "integer", "minimum": 1, "maximum": 10000, "default": 3000},
+        }},
+    },
+    {
+        "name": "network_device_report",
+        "description": "Export network devices with model, location, IP, MAC, ports, and raw GLPI summary fields.",
+        "inputSchema": {"type": "object", "properties": {
+            "query": {"type": "string"}, "format": {"type": "string", "enum": ["csv", "xlsx"], "default": "xlsx"},
+            "max_items": {"type": "integer", "minimum": 1, "maximum": 10000, "default": 3000},
+        }},
+    },
+    {
+        "name": "asset_field_catalog",
+        "description": "Discover the field paths returned by this GLPI deployment for a real asset.",
+        "inputSchema": {"type": "object", "required": ["id"], "properties": {
+            "id": {"type": "integer", "minimum": 1},
+            "asset_type": {"type": "string", "enum": ["computer", "network_device"], "default": "computer"},
+        }},
+    },
+])
+
 
 class McpServer:
     def __init__(self) -> None:
@@ -211,6 +268,12 @@ class McpServer:
             "custom_asset_report": self.custom_asset_report,
             "agent_health_check": self.agent_health_check,
             "glpi_raw_get": self.glpi_raw_get,
+            "asset_inventory_query": self.asset_inventory_query,
+            "asset_full_details": self.asset_full_details,
+            "software_inventory_query": self.software_inventory_query,
+            "asset_inventory_report": self.asset_inventory_report,
+            "network_device_report": self.network_device_report,
+            "asset_field_catalog": self.asset_field_catalog,
         }
 
     def handle(self, message: dict[str, Any]) -> dict[str, Any] | None:
@@ -407,6 +470,66 @@ class McpServer:
             response = client._request("GET", f"/{itemtype}/{int(args['id'])}", params={"expand_dropdowns": "true"})
         return response.data
 
+    def asset_full_details(self, args: dict[str, Any]) -> dict[str, Any]:
+        asset_type = str(args.get("asset_type", "computer"))
+        with GlpiClient(self.settings) as client:
+            item = client.get_complete_item(asset_type, int(args["id"]))
+        return normalize_asset(item, asset_type, include_raw=bool(args.get("include_raw", False)))
+
+    def asset_inventory_query(self, args: dict[str, Any]) -> dict[str, Any]:
+        with GlpiClient(self.settings) as client:
+            items = client.complete_inventory("computer", max_items=int(args.get("max_items", 3000)))
+        assets = [normalize_asset(item) for item in items]
+        assets = _filter_normalized_assets(assets, args)
+        total = len(assets)
+        assets = assets[:int(args.get("limit", 100))]
+        return {"total_matches": total, "returned": len(assets), "items": assets}
+
+    def software_inventory_query(self, args: dict[str, Any]) -> dict[str, Any]:
+        with GlpiClient(self.settings) as client:
+            items = client.complete_inventory("computer", max_items=int(args.get("max_computers", 3000)))
+        assets = [normalize_asset(item) for item in items]
+        if args.get("os_family"):
+            assets = [asset for asset in assets if asset["os_family"] == args["os_family"]]
+        computer_query = str(args.get("computer_query") or "").casefold()
+        software_query = str(args.get("query") or "").casefold()
+        rows: list[dict[str, Any]] = []
+        for asset in assets:
+            if computer_query and computer_query not in json.dumps(asset, ensure_ascii=False).casefold():
+                continue
+            for software in asset["software"]:
+                if software_query and software_query not in json.dumps(software, ensure_ascii=False).casefold():
+                    continue
+                rows.append({"Computer ID": asset["id"], "Computer": asset["name"], "OS family": asset["os_family"], **software})
+        total = len(rows)
+        rows = rows[:int(args.get("limit", 500))]
+        return {"total_matches": total, "returned": len(rows), "items": rows}
+
+    def asset_inventory_report(self, args: dict[str, Any]) -> dict[str, Any]:
+        query_args = {**args, "limit": int(args.get("max_items", 3000))}
+        result = self.asset_inventory_query(query_args)
+        rows = [_asset_report_row(asset) for asset in result["items"]]
+        report = generate_report(rows, self.settings.reports_dir, report_type="asset-inventory", file_format=args.get("format", "xlsx"))
+        return {"matches": result["total_matches"], "preview": rows[:20], "report": report}
+
+    def network_device_report(self, args: dict[str, Any]) -> dict[str, Any]:
+        with GlpiClient(self.settings) as client:
+            items = client.complete_inventory("network_device", max_items=int(args.get("max_items", 3000)))
+        assets = [normalize_asset(item, "network_device") for item in items]
+        query = str(args.get("query") or "").casefold()
+        if query:
+            assets = [asset for asset in assets if query in json.dumps(asset, ensure_ascii=False).casefold()]
+        rows = [_asset_report_row(asset) for asset in assets]
+        report = generate_report(rows, self.settings.reports_dir, report_type="network-devices", file_format=args.get("format", "xlsx"))
+        return {"matches": len(rows), "preview": rows[:20], "report": report}
+
+    def asset_field_catalog(self, args: dict[str, Any]) -> dict[str, Any]:
+        asset_type = str(args.get("asset_type", "computer"))
+        with GlpiClient(self.settings) as client:
+            item = client.get_complete_item(asset_type, int(args["id"]))
+        paths = sorted(_discover_field_paths(item))
+        return {"asset_type": asset_type, "id": int(args["id"]), "field_count": len(paths), "fields": paths}
+
     @staticmethod
     def response(request_id: Any, result: Any) -> dict[str, Any]:
         return {"jsonrpc": "2.0", "id": request_id, "result": result}
@@ -414,6 +537,54 @@ class McpServer:
     @staticmethod
     def error(request_id: Any, code: int, message: str) -> dict[str, Any]:
         return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
+
+
+def _filter_normalized_assets(assets: list[dict[str, Any]], args: dict[str, Any]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for asset in assets:
+        if args.get("os_family") and asset["os_family"] != args["os_family"]:
+            continue
+        text = json.dumps(asset, ensure_ascii=False).casefold()
+        if args.get("query") and str(args["query"]).casefold() not in text:
+            continue
+        if args.get("ip") and str(args["ip"]).casefold() not in json.dumps(asset["networks"], ensure_ascii=False).casefold():
+            continue
+        if args.get("software") and str(args["software"]).casefold() not in json.dumps(asset["software"], ensure_ascii=False).casefold():
+            continue
+        result.append(asset)
+    return result
+
+
+def _asset_report_row(asset: dict[str, Any]) -> dict[str, Any]:
+    networks = asset.get("networks", [])
+    storage = asset.get("storage", [])
+    software = asset.get("software", [])
+    return {
+        "ID": asset.get("id"), "Name": asset.get("name"), "Asset type": asset.get("asset_type"),
+        "OS family": asset.get("os_family"), "Serial": asset.get("serial"), "Asset tag": asset.get("asset_tag"),
+        "UUID": asset.get("uuid"), "Location": asset.get("location"), "Status": asset.get("status"),
+        "Manufacturer": asset.get("manufacturer"), "Model": asset.get("model"),
+        "IP addresses": ", ".join(row.get("ip", "") for row in networks if row.get("ip")),
+        "MAC addresses": ", ".join(row.get("mac", "") for row in networks if row.get("mac")),
+        "Network ports": len(networks), "Storage": json.dumps(storage, ensure_ascii=False),
+        "Software count": len(software), "Software": ", ".join(row.get("Display name", "") for row in software),
+        "Updated": asset.get("updated"),
+    }
+
+
+def _discover_field_paths(value: Any, prefix: str = "") -> set[str]:
+    paths: set[str] = set()
+    if isinstance(value, dict):
+        for key, child in value.items():
+            path = f"{prefix}.{key}" if prefix else str(key)
+            paths.add(path)
+            paths.update(_discover_field_paths(child, path))
+    elif isinstance(value, list):
+        list_prefix = f"{prefix}[]"
+        paths.add(list_prefix)
+        for child in value[:10]:
+            paths.update(_discover_field_paths(child, list_prefix))
+    return paths
 
 
 def main() -> None:

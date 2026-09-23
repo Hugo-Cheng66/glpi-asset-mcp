@@ -5,8 +5,12 @@ description = "A lightweight MCP server for GLPI asset inventory queries and rep
 requires-python = ">=3.10"
 dependencies = [
   "openpyxl>=3.1.0",
+  "mcp>=2.0.0,<3.0.0",
 ]
 
 [project.scripts]
 glpi-asset-mcp = "glpi_asset_mcp.server:main"
+
+[tool.setuptools]
+packages = ["glpi_asset_mcp"]
 
