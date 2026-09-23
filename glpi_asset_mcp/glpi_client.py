@@ -31,6 +31,13 @@ DEFAULT_AGENT_DATE_FIELDS = [
     "updated",
 ]
 
+DEFAULT_AGENT_VERSION_FIELDS = [
+    "agent_version",
+    "glpi_agent_version",
+    "fusioninventory_agent_version",
+    "useragent",
+]
+
 
 @dataclass
 class GlpiResponse:
@@ -428,6 +435,11 @@ def normalize_asset(item: dict[str, Any], asset_type: str = "computer", *, inclu
         "asset_type": resolve_asset_type(asset_type),
         "name": item.get("name", ""),
         "os_family": detect_os_family(item),
+        "operating_system": _value_to_text(
+            item.get("operating_system")
+            or item.get("operatingsystems_id")
+            or item.get("operating_system_name")
+        ),
         "serial": item.get("serial", ""),
         "asset_tag": item.get("otherserial", ""),
         "uuid": item.get("uuid", ""),
@@ -689,6 +701,36 @@ def parse_glpi_datetime(value: str | None) -> datetime | None:
         return None
 
 
+def find_first_text_value(item: dict[str, Any], fields: list[str]) -> tuple[str | None, str | None]:
+    """Find a deployment-specific field without requiring a fixed GLPI schema."""
+    for field in fields:
+        direct = _get_path(item, field)
+        if direct not in (None, ""):
+            return _value_to_text(direct), field
+
+    lowered_fields = {field.casefold() for field in fields}
+    found: tuple[str | None, str | None] = (None, None)
+
+    def visit(value: Any, path: str) -> None:
+        nonlocal found
+        if found[0] is not None:
+            return
+        if isinstance(value, dict):
+            for key, child in value.items():
+                key_text = str(key)
+                full_path = f"{path}.{key_text}" if path else key_text
+                if key_text.casefold() in lowered_fields and child not in (None, ""):
+                    found = (_value_to_text(child), full_path)
+                    return
+                visit(child, full_path)
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                visit(child, f"{path}[{index}]")
+
+    visit(item, "")
+    return found
+
+
 def _get_path(item: Any, path: str) -> Any:
     current = item
     for part in path.split("."):
@@ -697,3 +739,4 @@ def _get_path(item: Any, path: str) -> Any:
             continue
         return None
     return current
+
