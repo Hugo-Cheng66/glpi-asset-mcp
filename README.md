@@ -22,6 +22,7 @@ The first version is intentionally focused on your current scope:
 | `windows_software_report` | Count Windows computers and export installed software to XLSX. |
 | `custom_asset_report` | Export any GLPI item type with user-selected fields. |
 | `agent_health_check` | Find assets with stale or missing agent inventory/contact dates. |
+| `glpi_agent_list` | Show a chat-ready GLPI Agent table with host, IP, OS, version, last inventory, and inferred health. |
 | `glpi_raw_get` | Advanced raw read for any GLPI item type. |
 | `asset_inventory_query` | Query Windows/Linux computers by text, OS, IP, or installed software. |
 | `asset_full_details` | Return one normalized asset with software, IP/MAC, and storage. |
@@ -350,3 +351,4 @@ GLPI API -> sync worker -> PostgreSQL/MySQL asset_cache -> MCP tools
 ```
 
 Keep writes through GLPI API. Use the cache database for reports, filters, and expensive summaries.
+
