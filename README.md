@@ -234,6 +234,16 @@ Build the image:
 docker build -t glpi-asset-mcp:0.1.0 .
 ```
 
+Podman users who want the Dockerfile `HEALTHCHECK` metadata preserved should
+build with Docker image format:
+
+```bash
+podman build --format docker -t glpi-asset-mcp:0.1.0 .
+```
+
+The default OCI format ignores Dockerfile health-check metadata. This does not
+prevent the MCP server from running, and Kubernetes uses its own probes.
+
 Run the MCP Streamable HTTP server used by Open WebUI and Kubernetes:
 
 ```bash
@@ -244,6 +254,11 @@ docker run --rm -p 8000:8000 \
   -v "$PWD/reports:/app/reports" \
   glpi-asset-mcp:0.1.0
 ```
+
+Create the bind-mount directory first with `mkdir -p reports`. Replace every
+example value with the real GLPI URL and tokens. The URL value must be a plain
+URL such as `https://glpi.company.example/apirest.php`; do not paste Markdown
+link syntax such as `[https://...](https://...)`.
 
 The MCP endpoint is:
 

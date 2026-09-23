@@ -164,14 +164,18 @@ def main() -> None:
     host = os.environ.get("GLPI_MCP_HTTP_HOST", "0.0.0.0")
     port = int(os.environ.get("GLPI_MCP_HTTP_PORT", "8000"))
     path = os.environ.get("GLPI_MCP_HTTP_PATH", "/mcp")
-    mcp.run(
-        transport="streamable-http",
-        host=host,
-        port=port,
-        streamable_http_path=path,
-        stateless_http=True,
-        json_response=True,
-    )
+    try:
+        mcp.run(
+            transport="streamable-http",
+            host=host,
+            port=port,
+            streamable_http_path=path,
+            stateless_http=True,
+            json_response=True,
+        )
+    except KeyboardInterrupt:
+        # The MCP SDK has already completed ASGI shutdown at this point.
+        pass
 
 
 if __name__ == "__main__":
