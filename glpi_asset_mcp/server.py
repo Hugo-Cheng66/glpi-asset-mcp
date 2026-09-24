@@ -105,7 +105,7 @@ TOOLS = [
     },
     {
         "name": "windows_software_report",
-        "description": "Generate an Excel report of software installed on Windows computers, with Windows computer count.",
+        "description": "Generate one XLSX software report for Windows computers. Use this tool alone for report requests; return only metadata and the first 20 rows. Do not call custom_asset_report or software_inventory_query.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -416,10 +416,15 @@ class McpServer:
             file_format="xlsx",
             columns=["Display name", "Version", "Discovery model", "Installed on", "Updated"],
         )
+        preview = inventory["rows"][:20]
         return {
             "windows_computer_count": inventory["windows_computer_count"],
             "software_row_count": inventory["software_row_count"],
+            "fields": ["Display name", "Version", "Discovery model", "Installed on", "Updated"],
+            "preview": preview,
+            "markdown_preview": _markdown_table(preview, ["Display name", "Version", "Discovery model", "Installed on", "Updated"]),
             "report": report,
+            "instruction": "Present the report path, row count, and markdown_preview. Do not output all software rows or call another tool.",
         }
 
     def custom_asset_report(self, args: dict[str, Any]) -> dict[str, Any]:
