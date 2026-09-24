@@ -64,7 +64,7 @@ def report_generate(
     return service.report_generate(locals())
 
 
-@mcp.tool(description="Generate an Excel report of software installed on Windows computers.")
+@mcp.tool(description="Generate one XLSX software report for Windows computers. Use this tool alone for software report requests; scan at most the requested number of computers, return only report metadata and the first 20 rows, and do not call custom_asset_report or software_inventory_query.")
 def windows_software_report(
     max_computers: Annotated[int, Field(ge=1, le=10000)] = 3000,
 ) -> dict:
