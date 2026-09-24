@@ -48,6 +48,8 @@ Export all network devices in the Shanghai location to XLSX.
 a single aggregated view. `asset_inventory_report` and
 `network_device_report` also return the first 20 rows as an inline preview so
 Open WebUI can answer even when the generated file lives in another container.
+Use `glpi_agent_list` with `agent_version` for Agent version filtering; this
+field matches the Agent value itself and does not search installed software.
 Every generated report also includes a one-time `download_url`. Set
 `GLPI_MCP_PUBLIC_BASE_URL` to a URL reachable by the WebUI browser, such as
 `http://172.19.168.10:8000`. The report is deleted after a successful download;
