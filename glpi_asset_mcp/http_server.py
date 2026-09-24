@@ -115,9 +115,10 @@ def agent_health_check(
     return service.agent_health_check(locals())
 
 
-@mcp.tool(description="List GLPI Agent computers with hostname, IP, OS, agent version, last inventory time, and health status. Use for 'GLPI agent list' requests.")
+@mcp.tool(description="List GLPI Agent computers with hostname, IP, OS, agent version, last inventory time, and health status. Use this tool alone for Agent version questions; agent_version=1.17 matches GLPI-Agent_v1.17-1, 1.17-1, and 1.17. Do not use software_inventory_query for Agent version filtering.")
 def glpi_agent_list(
     query: str | None = None,
+    agent_version: str | None = None,
     stale_days: Annotated[int, Field(ge=1, le=3650)] = 30,
     max_items: Annotated[int, Field(ge=1, le=10000)] = 3000,
     limit: Annotated[int, Field(ge=1, le=1000)] = 100,
