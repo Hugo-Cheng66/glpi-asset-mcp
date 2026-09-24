@@ -28,7 +28,7 @@ The first version is intentionally focused on your current scope:
 | `asset_full_details` | Return one normalized asset with software, IP/MAC, and storage. |
 | `software_inventory_query` | Search installed software across Windows and Linux computers. |
 | `asset_inventory_report` | Generate a one-call computer report with selected business fields and a chat-ready preview. |
-| `network_device_report` | Export network equipment with IP, MAC, model, location, and port summaries. |
+| `network_device_report` | Generate a one-call network device report with selected fields and a chat-ready preview. |
 | `asset_field_catalog` | Discover real field paths exposed by the connected GLPI deployment. |
 
 ## Natural-language inventory queries
