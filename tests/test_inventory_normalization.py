@@ -67,6 +67,21 @@ class InventoryNormalizationTests(unittest.TestCase):
         self.assertEqual("1.17", value)
         self.assertEqual("inventory.glpi_agent_version", path)
 
+    def test_finds_glpi_user_agent_aliases(self) -> None:
+        value, path = find_first_text_value(
+            {"inventory": {"User-Agent": "GLPI-Agent_v1.17-1"}},
+            ["agent_version", "useragent", "versionclient"],
+        )
+        self.assertEqual("GLPI-Agent_v1.17-1", value)
+        self.assertEqual("inventory.User-Agent", path)
+
+        value, path = find_first_text_value(
+            {"versionclient": "GLPI-Agent_v1.17-1"},
+            ["agent_version", "useragent", "versionclient"],
+        )
+        self.assertEqual("GLPI-Agent_v1.17-1", value)
+        self.assertEqual("versionclient", path)
+
 
 if __name__ == "__main__":
     unittest.main()
