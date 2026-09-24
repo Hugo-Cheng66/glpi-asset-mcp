@@ -13,23 +13,14 @@ The first version is intentionally focused on your current scope:
 
 | Tool | Purpose |
 | --- | --- |
-| `asset_search` | Search computer assets. Use `asset_type=linux/windows/computer`. |
-| `asset_get` | Get one computer asset by GLPI id. |
 | `asset_summary` | Return bounded sample counts for computers and network devices. |
-| `network_device_search` | Search GLPI network equipment. |
-| `network_device_get` | Get one network device by GLPI id. |
-| `report_generate` | Export GLPI API results as CSV or XLSX. |
-| `windows_software_report` | Count Windows computers and export installed software to XLSX. |
-| `custom_asset_report` | Export any GLPI item type with user-selected fields. |
-| `agent_health_check` | Find assets with stale or missing agent inventory/contact dates. |
 | `glpi_agent_list` | Show a chat-ready GLPI Agent table with host, IP, OS, version, last inventory, and inferred health. |
-| `glpi_raw_get` | Advanced raw read for any GLPI item type. |
 | `asset_inventory_query` | Query Windows/Linux computers by text, OS, IP, or installed software. |
 | `asset_full_details` | Return one normalized asset with software, IP/MAC, and storage. |
 | `software_inventory_query` | Search installed software across Windows and Linux computers. |
+| `software_inventory_report` | Generate one CSV/XLSX software report across Windows/Linux computers. |
 | `asset_inventory_report` | Generate a one-call computer report with selected business fields and a chat-ready preview. |
 | `network_device_report` | Generate a one-call network device report with selected fields and a chat-ready preview. |
-| `asset_field_catalog` | Discover real field paths exposed by the connected GLPI deployment. |
 
 ## Natural-language inventory queries
 
@@ -46,19 +37,13 @@ Export all network devices in the Shanghai location to XLSX.
 `asset_inventory_query` returns inline JSON data for chat answers. It accepts
 `query`, `os_family`, `ip`, and `software` filters. `asset_full_details` returns
 a single aggregated view. `asset_inventory_report` and
-`network_device_report` also return the first 20 rows as an inline preview so
+`network_device_report` also returns the first 20 rows as an inline preview so
 Open WebUI can answer even when the generated file lives in another container.
 Use `glpi_agent_list` with `agent_version` for Agent version filtering; this
 field matches the Agent value itself and does not search installed software.
-Every generated report also includes a one-time `download_url`. Set
-`GLPI_MCP_PUBLIC_BASE_URL` to a URL reachable by the WebUI browser, such as
-`http://172.19.168.10:8000`. The report is deleted after a successful download;
-undownloaded reports are removed after `GLPI_REPORT_RETENTION_SECONDS` (default
-24 hours).
-
-GLPI versions and plugins expose different nested field names. Call
-`asset_field_catalog` with a representative asset ID to discover the paths
-available in the current deployment before building a custom report.
+Reports return the server path in `reports`. Retrieve files from the mounted
+reports directory on the MCP host. Old CSV/XLSX files are removed after
+`GLPI_REPORT_RETENTION_SECONDS` (default 24 hours).
 
 ## Compatibility
 
@@ -68,11 +53,10 @@ GLPI Agent v1.17-1 is not called directly by this MCP. The MCP reads the invento
 
 Known practical note: GLPI 11.0.x and Agent 1.17 deployments may expose different field names for "last inventory" or "last contact" depending on native inventory, plugins, and saved fields. The health check therefore checks multiple candidate fields and lets you override them with `date_fields`.
 
-## Custom reports
+## Software reports
 
-Use `custom_asset_report` when the user wants to choose columns dynamically.
-
-Basic computer report:
+Use `software_inventory_report` for a file and `software_inventory_query` only
+for a small inline answer. The software report contains:
 
 ```json
 {
@@ -169,25 +153,12 @@ If your GLPI exposes a known custom field for agent contact time, pass it first:
 }
 ```
 
-## Windows software report
-
-Use `windows_software_report` when you need to know how many Windows machines are currently in GLPI and export their installed software inventory.
-
-The XLSX file contains these columns:
-
-```text
-Display name
-Version
-Discovery model
-Installed on
-Updated
-```
-
-Example MCP tool arguments:
+Example arguments:
 
 ```json
 {
-  "max_computers": 3000
+  "max_computers": 300,
+  "format": "xlsx"
 }
 ```
 
@@ -213,6 +184,8 @@ $env:GLPI_BASE_URL="https://glpi.example.com/apirest.php"
 $env:GLPI_APP_TOKEN="your-app-token"
 $env:GLPI_USER_TOKEN="your-user-token"
 $env:GLPI_REPORTS_DIR="C:\path\to\reports"
+$env:GLPI_REPORTS_HOST_PATH="C:\path\to\reports"
+$env:GLPI_REPORT_RETENTION_SECONDS="86400"
 ```
 
 You can also use username/password instead of `GLPI_USER_TOKEN`:
