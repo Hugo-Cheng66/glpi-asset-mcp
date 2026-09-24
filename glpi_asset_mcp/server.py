@@ -17,7 +17,7 @@ from .glpi_client import (
     normalize_asset,
     parse_glpi_datetime,
 )
-from .reports import expand_items, generate_custom_report, generate_report
+from .reports import cleanup_expired_reports, expand_items, generate_custom_report, generate_report
 
 
 SERVER_INFO = {
@@ -289,6 +289,7 @@ TOOLS.extend([
 class McpServer:
     def __init__(self) -> None:
         self.settings = Settings.from_env()
+        cleanup_expired_reports(self.settings.reports_dir)
         self.handlers: dict[str, Callable[[dict[str, Any]], Any]] = {
             "asset_search": self.asset_search,
             "asset_get": self.asset_get,
