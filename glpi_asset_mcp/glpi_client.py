@@ -440,6 +440,12 @@ def normalize_asset(item: dict[str, Any], asset_type: str = "computer", *, inclu
             or item.get("operatingsystems_id")
             or item.get("operating_system_name")
         ),
+        "os_version": _value_to_text(
+            item.get("os_version")
+            or item.get("operating_system_version")
+            or item.get("operatingsystemversions_id")
+            or item.get("operating_system_version_name")
+        ),
         "serial": item.get("serial", ""),
         "asset_tag": item.get("otherserial", ""),
         "uuid": item.get("uuid", ""),
