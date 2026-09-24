@@ -160,11 +160,16 @@ def asset_inventory_report(
     return service.asset_inventory_report(locals())
 
 
-@mcp.tool(description="Export network devices with model, location, IP, MAC, ports, and storage/device fields.")
+@mcp.tool(description="Generate a network device inventory report in one call. Use this tool alone for selected fields such as name, serial number, hostname, IP, MAC, manufacturer, model, location, status, and port count.")
 def network_device_report(
     query: str | None = None,
     format: Literal["csv", "xlsx"] = "xlsx",
     max_items: Annotated[int, Field(ge=1, le=10000)] = 3000,
+    fields: list[Literal[
+        "name", "serial_number", "hostname", "ip_address", "mac_address",
+        "manufacturer", "model", "location", "status", "asset_tag",
+        "network_ports", "updated",
+    ]] | None = None,
 ) -> dict:
     return service.network_device_report(locals())
 
