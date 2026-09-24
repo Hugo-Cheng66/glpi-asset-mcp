@@ -252,11 +252,15 @@ TOOLS.extend([
     },
     {
         "name": "asset_inventory_report",
-        "description": "Export normalized computer inventory with OS, IP, MAC, software, and storage summaries.",
+        "description": "Generate a computer inventory report in one call. Use this tool alone for requested fields; do not call field catalog or per-asset details first.",
         "inputSchema": {"type": "object", "properties": {
             "query": {"type": "string"}, "os_family": {"type": "string", "enum": ["windows", "linux", "unknown"]},
             "format": {"type": "string", "enum": ["csv", "xlsx"], "default": "xlsx"},
             "max_items": {"type": "integer", "minimum": 1, "maximum": 10000, "default": 3000},
+            "fields": {"type": "array", "items": {"type": "string", "enum": [
+                "name", "serial_number", "hostname", "operating_system", "os_version", "ip_address",
+                "mac_address", "location", "manufacturer", "model", "asset_tag", "software_count", "updated"
+            ]}},
         }},
     },
     {
@@ -598,8 +602,31 @@ class McpServer:
         query_args = {**args, "limit": int(args.get("max_items", 3000))}
         result = self.asset_inventory_query(query_args)
         rows = [_asset_report_row(asset) for asset in result["items"]]
-        report = generate_report(rows, self.settings.reports_dir, report_type="asset-inventory", file_format=args.get("format", "xlsx"))
-        return {"matches": result["total_matches"], "preview": rows[:20], "report": report}
+        field_columns = {
+            "name": "Name", "serial_number": "Serial number", "hostname": "Hostname",
+            "operating_system": "Operating system", "os_version": "OS version",
+            "ip_address": "IP address", "mac_address": "MAC address", "location": "Location",
+            "manufacturer": "Manufacturer", "model": "Model", "asset_tag": "Asset tag",
+            "software_count": "Software count", "updated": "Updated",
+        }
+        requested_fields = args.get("fields") or [
+            "name", "serial_number", "hostname", "operating_system", "os_version", "ip_address"
+        ]
+        unknown_fields = [field for field in requested_fields if field not in field_columns]
+        if unknown_fields:
+            raise ValueError(f"Unsupported report fields: {', '.join(unknown_fields)}")
+        columns = [field_columns[field] for field in requested_fields]
+        projected_rows = [{column: row.get(column, "") for column in columns} for row in rows]
+        report = generate_report(
+            projected_rows, self.settings.reports_dir, report_type="asset-inventory",
+            file_format=args.get("format", "xlsx"), columns=columns,
+        )
+        preview = projected_rows[:20]
+        return {
+            "matches": result["total_matches"], "returned": len(projected_rows), "fields": requested_fields,
+            "preview": preview, "markdown_preview": _markdown_table(preview, columns), "report": report,
+            "instruction": "Present markdown_preview and the generated file path. Do not call other tools.",
+        }
 
     def network_device_report(self, args: dict[str, Any]) -> dict[str, Any]:
         with GlpiClient(self.settings) as client:
@@ -649,16 +676,33 @@ def _asset_report_row(asset: dict[str, Any]) -> dict[str, Any]:
     storage = asset.get("storage", [])
     software = asset.get("software", [])
     return {
-        "ID": asset.get("id"), "Name": asset.get("name"), "Asset type": asset.get("asset_type"),
-        "OS family": asset.get("os_family"), "Serial": asset.get("serial"), "Asset tag": asset.get("asset_tag"),
+        "ID": asset.get("id"), "Name": asset.get("name"), "Hostname": asset.get("name"),
+        "Asset type": asset.get("asset_type"), "OS family": asset.get("os_family"),
+        "Operating system": asset.get("operating_system"), "OS version": asset.get("os_version"),
+        "Serial": asset.get("serial"), "Serial number": asset.get("serial"), "Asset tag": asset.get("asset_tag"),
         "UUID": asset.get("uuid"), "Location": asset.get("location"), "Status": asset.get("status"),
         "Manufacturer": asset.get("manufacturer"), "Model": asset.get("model"),
         "IP addresses": ", ".join(row.get("ip", "") for row in networks if row.get("ip")),
+        "IP address": ", ".join(row.get("ip", "") for row in networks if row.get("ip")),
         "MAC addresses": ", ".join(row.get("mac", "") for row in networks if row.get("mac")),
+        "MAC address": ", ".join(row.get("mac", "") for row in networks if row.get("mac")),
         "Network ports": len(networks), "Storage": json.dumps(storage, ensure_ascii=False),
         "Software count": len(software), "Software": ", ".join(row.get("Display name", "") for row in software),
         "Updated": asset.get("updated"),
     }
+
+
+def _markdown_table(rows: list[dict[str, Any]], columns: list[str]) -> str:
+    if not rows:
+        return "No matching assets."
+    lines = [
+        "| " + " | ".join(columns) + " |",
+        "| " + " | ".join("---" for _ in columns) + " |",
+    ]
+    for row in rows:
+        values = [str(row.get(column, "") or "-").replace("|", "\\|").replace("\n", " ") for column in columns]
+        lines.append("| " + " | ".join(values) + " |")
+    return "\n".join(lines)
 
 
 def _discover_field_paths(value: Any, prefix: str = "") -> set[str]:
