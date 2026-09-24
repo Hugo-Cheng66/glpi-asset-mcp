@@ -82,6 +82,14 @@ class InventoryNormalizationTests(unittest.TestCase):
         self.assertEqual("GLPI-Agent_v1.17-1", value)
         self.assertEqual("versionclient", path)
 
+    def test_agent_version_filter_matches_glpi_agent_suffix(self) -> None:
+        agents = [
+            {"agent_version": "GLPI-Agent_v1.17-1"},
+            {"agent_version": "1.16"},
+        ]
+        matches = [agent for agent in agents if "1.17" in agent["agent_version"].casefold()]
+        self.assertEqual([{"agent_version": "GLPI-Agent_v1.17-1"}], matches)
+
 
 if __name__ == "__main__":
     unittest.main()
