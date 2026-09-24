@@ -1,10 +1,67 @@
 from __future__ import annotations
 
 import csv
+import os
+import secrets
+import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+
+_DOWNLOADS: dict[str, tuple[Path, float]] = {}
+_DOWNLOADS_LOCK = threading.Lock()
+
+
+def register_report_download(path: Path) -> dict[str, str | int]:
+    """Create a one-time download URL for a generated report."""
+    token = secrets.token_urlsafe(32)
+    ttl = max(60, int(os.environ.get("GLPI_REPORT_RETENTION_SECONDS", "86400")))
+    expires_at = time.time() + ttl
+    with _DOWNLOADS_LOCK:
+        _purge_expired_locked()
+        _DOWNLOADS[token] = (path.resolve(), expires_at)
+    base_url = os.environ.get("GLPI_MCP_PUBLIC_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
+    return {
+        "download_url": f"{base_url}/reports/{path.name}?token={token}",
+        "download_expires_in_seconds": ttl,
+    }
+
+
+def claim_report_download(filename: str, token: str) -> Path | None:
+    """Consume a valid one-time report token and return its file path."""
+    with _DOWNLOADS_LOCK:
+        _purge_expired_locked()
+        record = _DOWNLOADS.pop(token, None)
+    if not record:
+        return None
+    path, expires_at = record
+    if path.name != filename or expires_at <= time.time() or not path.is_file():
+        return None
+    return path
+
+
+def cleanup_expired_reports(reports_dir: Path) -> int:
+    """Remove old generated reports, including reports from before a restart."""
+    reports_dir.mkdir(parents=True, exist_ok=True)
+    ttl = max(60, int(os.environ.get("GLPI_REPORT_RETENTION_SECONDS", "86400")))
+    cutoff = time.time() - ttl
+    removed = 0
+    for path in reports_dir.iterdir():
+        if path.is_file() and path.suffix.lower() in {".csv", ".xlsx"} and path.stat().st_mtime < cutoff:
+            path.unlink(missing_ok=True)
+            removed += 1
+    return removed
+
+
+def _purge_expired_locked() -> None:
+    now = time.time()
+    expired = [token for token, (_, expires_at) in _DOWNLOADS.items() if expires_at <= now]
+    for token in expired:
+        path, _ = _DOWNLOADS.pop(token)
+        path.unlink(missing_ok=True)
 
 
 DEFAULT_COLUMNS = [
@@ -47,12 +104,14 @@ def generate_report(
     else:
         raise ValueError("file_format must be csv or xlsx")
 
+    download = register_report_download(path)
     return {
         "report_id": report_id,
         "format": file_format,
         "path": str(path),
         "rows": len(items),
         "columns": selected_columns,
+        **download,
     }
 
 
@@ -205,3 +264,4 @@ def _stringify(value: Any) -> str:
     if isinstance(value, list):
         return ", ".join(_stringify(item) for item in value if _stringify(item))
     return str(value)
+
