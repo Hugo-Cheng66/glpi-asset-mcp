@@ -145,12 +145,17 @@ def software_inventory_query(
     return service.software_inventory_query(locals())
 
 
-@mcp.tool(description="Export computer inventory with OS, IP, MAC, software, and storage summaries.")
+@mcp.tool(description="Generate a computer inventory report in one call. Use this tool alone for user-requested fields such as name, serial number, hostname, operating system, OS version, and IP address; do not call field catalog or per-asset details first.")
 def asset_inventory_report(
     query: str | None = None,
     os_family: Literal["windows", "linux", "unknown"] | None = None,
     format: Literal["csv", "xlsx"] = "xlsx",
     max_items: Annotated[int, Field(ge=1, le=10000)] = 3000,
+    fields: list[Literal[
+        "name", "serial_number", "hostname", "operating_system", "os_version",
+        "ip_address", "mac_address", "location", "manufacturer", "model",
+        "asset_tag", "software_count", "updated",
+    ]] | None = None,
 ) -> dict:
     return service.asset_inventory_report(locals())
 
