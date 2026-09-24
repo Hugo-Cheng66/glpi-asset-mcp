@@ -5,11 +5,8 @@ from typing import Annotated, Literal
 
 from mcp.server.mcpserver import MCPServer
 from pydantic import Field
-from starlette.background import BackgroundTask
-from starlette.requests import Request
-from starlette.responses import FileResponse, PlainTextResponse
 
-from .reports import claim_report_download, cleanup_expired_reports
+from .reports import cleanup_expired_reports
 from .server import McpServer as ToolService
 
 
@@ -20,99 +17,9 @@ mcp = MCPServer(
 )
 
 
-@mcp.custom_route("/reports/{filename}", methods=["GET"], include_in_schema=False)
-async def download_report(request: Request) -> FileResponse | PlainTextResponse:
-    filename = request.path_params["filename"]
-    token = request.query_params.get("token", "")
-    path = claim_report_download(filename, token)
-    if path is None:
-        return PlainTextResponse("Report link is invalid, expired, or already used.", status_code=404)
-    return FileResponse(
-        path,
-        filename=path.name,
-        media_type="application/octet-stream",
-        background=BackgroundTask(path.unlink, missing_ok=True),
-    )
-
-
-@mcp.tool(description="Search GLPI computer assets. Use asset_type linux/windows/computer for VMs and servers.")
-def asset_search(
-    asset_type: Literal["computer", "linux", "windows"] = "computer",
-    query: str | None = None,
-    limit: Annotated[int, Field(ge=1, le=500)] = 50,
-    offset: Annotated[int, Field(ge=0)] = 0,
-) -> dict:
-    return service.asset_search(locals())
-
-
-@mcp.tool(description="Get one GLPI computer asset by id.")
-def asset_get(
-    id: Annotated[int, Field(ge=1)],
-    asset_type: Literal["computer", "linux", "windows"] = "computer",
-) -> dict:
-    return service.asset_get(locals())
-
-
 @mcp.tool(description="Return a lightweight summary count from GLPI computers and network devices.")
 def asset_summary(sample_limit: Annotated[int, Field(ge=1, le=500)] = 100) -> dict:
     return service.asset_summary(locals())
-
-
-@mcp.tool(description="Search GLPI network equipment assets.")
-def network_device_search(
-    query: str | None = None,
-    limit: Annotated[int, Field(ge=1, le=500)] = 50,
-    offset: Annotated[int, Field(ge=0)] = 0,
-) -> dict:
-    return service.network_device_search(locals())
-
-
-@mcp.tool(description="Get one GLPI network equipment asset by id.")
-def network_device_get(id: Annotated[int, Field(ge=1)]) -> dict:
-    return service.network_device_get(locals())
-
-
-@mcp.tool(description="Generate a CSV or XLSX asset report from GLPI API data.")
-def report_generate(
-    asset_type: Literal["computer", "linux", "windows", "network_device"] = "computer",
-    query: str | None = None,
-    format: Literal["csv", "xlsx"] = "csv",
-    limit: Annotated[int, Field(ge=1, le=5000)] = 500,
-    columns: list[str] | None = None,
-) -> dict:
-    return service.report_generate(locals())
-
-
-@mcp.tool(description="Generate one XLSX software report for Windows computers. Use this tool alone for software report requests; scan at most the requested number of computers, return only report metadata and the first 20 rows, and do not call custom_asset_report or software_inventory_query.")
-def windows_software_report(
-    max_computers: Annotated[int, Field(ge=1, le=10000)] = 3000,
-) -> dict:
-    return service.windows_software_report(locals())
-
-
-@mcp.tool(description="Generate a custom CSV/XLSX report for any GLPI item type with user-selected fields.")
-def custom_asset_report(
-    fields: list[dict[str, str]],
-    itemtype: str = "Computer",
-    format: Literal["csv", "xlsx"] = "xlsx",
-    max_items: Annotated[int, Field(ge=1, le=10000)] = 3000,
-    query: str | None = None,
-    expand_path: str | None = None,
-    include_deleted: bool = False,
-    include_softwares: bool = False,
-) -> dict:
-    return service.custom_asset_report(locals())
-
-
-@mcp.tool(description="Check GLPI assets for stale or missing agent dates and generate an Excel report.")
-def agent_health_check(
-    itemtype: str = "Computer",
-    stale_days: Annotated[int, Field(ge=1, le=3650)] = 30,
-    max_items: Annotated[int, Field(ge=1, le=10000)] = 3000,
-    include_ok: bool = False,
-    date_fields: list[str] | None = None,
-) -> dict:
-    return service.agent_health_check(locals())
 
 
 @mcp.tool(description="List GLPI Agent computers with hostname, IP, OS, agent version, last inventory time, and health status. Use this tool alone for Agent version questions; agent_version=1.17 matches GLPI-Agent_v1.17-1, 1.17-1, and 1.17. Do not use software_inventory_query for Agent version filtering.")
@@ -128,24 +35,19 @@ def glpi_agent_list(
     return service.glpi_agent_list(locals())
 
 
-@mcp.tool(description="Advanced: get one raw GLPI item by itemtype and id.")
-def glpi_raw_get(itemtype: str, id: Annotated[int, Field(ge=1)]) -> dict:
-    return service.glpi_raw_get(locals())
-
-
-@mcp.tool(description="Query normalized Windows/Linux assets by text, IP, software, or OS family.")
+@mcp.tool(description="Query normalized Windows/Linux assets by text, IP, software, or OS family. Returns compact chat data; use a report tool for complete exports.")
 def asset_inventory_query(
     query: str | None = None,
     os_family: Literal["windows", "linux", "unknown"] | None = None,
     ip: str | None = None,
     software: str | None = None,
     max_items: Annotated[int, Field(ge=1, le=10000)] = 3000,
-    limit: Annotated[int, Field(ge=1, le=1000)] = 100,
+    limit: Annotated[int, Field(ge=1, le=200)] = 100,
 ) -> dict:
     return service.asset_inventory_query(locals())
 
 
-@mcp.tool(description="Get a complete normalized asset view including software, IP/MAC, storage, and optional raw GLPI data.")
+@mcp.tool(description="Get one complete normalized asset view including software, IP/MAC, and storage. Use for one specific asset only; do not call repeatedly for reports.")
 def asset_full_details(
     id: Annotated[int, Field(ge=1)],
     asset_type: Literal["computer", "network_device"] = "computer",
@@ -154,15 +56,25 @@ def asset_full_details(
     return service.asset_full_details(locals())
 
 
-@mcp.tool(description="Find installed software across Windows and Linux machines by name, version, or machine text.")
+@mcp.tool(description="Search installed software inline for a small result set. Default limit is 100; for complete data use software_inventory_report.")
 def software_inventory_query(
     query: str | None = None,
     computer_query: str | None = None,
     os_family: Literal["windows", "linux", "unknown"] | None = None,
-    max_computers: Annotated[int, Field(ge=1, le=10000)] = 3000,
-    limit: Annotated[int, Field(ge=1, le=5000)] = 500,
+    max_computers: Annotated[int, Field(ge=1, le=1000)] = 300,
+    limit: Annotated[int, Field(ge=1, le=1000)] = 100,
 ) -> dict:
     return service.software_inventory_query(locals())
+
+
+@mcp.tool(description="Generate one CSV/XLSX software report across Windows and Linux computers. Use this tool alone for software report requests; return only the server path, row count, and first 20 rows. Do not call custom reports or software_inventory_query.")
+def software_inventory_report(
+    max_computers: Annotated[int, Field(ge=1, le=1000)] = 300,
+    os_family: Literal["windows", "linux", "unknown"] | None = None,
+    query: str | None = None,
+    format: Literal["csv", "xlsx"] = "xlsx",
+) -> dict:
+    return service.software_inventory_report(locals())
 
 
 @mcp.tool(description="Generate a computer inventory report in one call. Use this tool alone for user-requested fields such as name, serial number, hostname, operating system, OS version, and IP address; do not call field catalog or per-asset details first.")
@@ -192,14 +104,6 @@ def network_device_report(
     ]] | None = None,
 ) -> dict:
     return service.network_device_report(locals())
-
-
-@mcp.tool(description="Discover field paths returned by this GLPI deployment for a real asset.")
-def asset_field_catalog(
-    id: Annotated[int, Field(ge=1)],
-    asset_type: Literal["computer", "network_device"] = "computer",
-) -> dict:
-    return service.asset_field_catalog(locals())
 
 
 def main() -> None:
