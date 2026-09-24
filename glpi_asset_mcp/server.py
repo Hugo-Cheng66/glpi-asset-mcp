@@ -299,6 +299,7 @@ class McpServer:
             "network_device_get": self.network_device_get,
             "report_generate": self.report_generate,
             "windows_software_report": self.windows_software_report,
+            "software_inventory_report": self.software_inventory_report,
             "custom_asset_report": self.custom_asset_report,
             "agent_health_check": self.agent_health_check,
             "glpi_agent_list": self.glpi_agent_list,
@@ -427,6 +428,32 @@ class McpServer:
             "markdown_preview": _markdown_table(preview, ["Display name", "Version", "Discovery model", "Installed on", "Updated"]),
             "report": report,
             "instruction": "Present the report path, row count, and markdown_preview. Do not output all software rows or call another tool.",
+        }
+
+    def software_inventory_report(self, args: dict[str, Any]) -> dict[str, Any]:
+        with GlpiClient(self.settings) as client:
+            inventory = client.software_inventory(
+                max_computers=int(args.get("max_computers", 300)),
+                os_family=args.get("os_family"),
+            )
+        query = str(args.get("query") or "").casefold()
+        rows = inventory["rows"]
+        if query:
+            rows = [row for row in rows if query in json.dumps(row, ensure_ascii=False).casefold()]
+        columns = ["Display name", "Version", "Discovery model", "Installed on", "Updated"]
+        report = generate_report(
+            rows, self.settings.reports_dir, report_type="software-inventory",
+            file_format=args.get("format", "xlsx"), columns=columns,
+        )
+        preview = rows[:20]
+        return {
+            "computer_count": inventory["computer_count"],
+            "software_row_count": len(rows),
+            "fields": columns,
+            "preview": preview,
+            "markdown_preview": _markdown_table(preview, columns),
+            "report": report,
+            "instruction": "Present the server path, row count, and markdown_preview. Do not output all software rows or call another tool.",
         }
 
     def custom_asset_report(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -593,7 +620,8 @@ class McpServer:
         assets = _filter_normalized_assets(assets, args)
         total = len(assets)
         assets = assets[:int(args.get("limit", 100))]
-        return {"total_matches": total, "returned": len(assets), "items": assets}
+        compact_assets = [_compact_asset_for_chat(asset) for asset in assets]
+        return {"total_matches": total, "returned": len(compact_assets), "items": compact_assets}
 
     def software_inventory_query(self, args: dict[str, Any]) -> dict[str, Any]:
         with GlpiClient(self.settings) as client:
@@ -710,6 +738,16 @@ def _filter_normalized_assets(assets: list[dict[str, Any]], args: dict[str, Any]
             continue
         result.append(asset)
     return result
+
+
+def _compact_asset_for_chat(asset: dict[str, Any], software_limit: int = 50) -> dict[str, Any]:
+    """Keep list responses small while preserving counts and report completeness."""
+    compact = dict(asset)
+    software = list(asset.get("software", []))
+    compact["software"] = software[:software_limit]
+    compact["software_count"] = len(software)
+    compact["software_truncated"] = len(software) > software_limit
+    return compact
 
 
 def _asset_report_row(asset: dict[str, Any]) -> dict[str, Any]:
