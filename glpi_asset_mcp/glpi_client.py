@@ -36,6 +36,10 @@ DEFAULT_AGENT_VERSION_FIELDS = [
     "glpi_agent_version",
     "fusioninventory_agent_version",
     "useragent",
+    "user-agent",
+    "user_agent",
+    "versionclient",
+    "agent.version",
 ]
 
 
@@ -714,7 +718,7 @@ def find_first_text_value(item: dict[str, Any], fields: list[str]) -> tuple[str 
         if direct not in (None, ""):
             return _value_to_text(direct), field
 
-    lowered_fields = {field.casefold() for field in fields}
+    lowered_fields = {_canonical_field_name(field) for field in fields}
     found: tuple[str | None, str | None] = (None, None)
 
     def visit(value: Any, path: str) -> None:
@@ -725,7 +729,7 @@ def find_first_text_value(item: dict[str, Any], fields: list[str]) -> tuple[str 
             for key, child in value.items():
                 key_text = str(key)
                 full_path = f"{path}.{key_text}" if path else key_text
-                if key_text.casefold() in lowered_fields and child not in (None, ""):
+                if _canonical_field_name(key_text) in lowered_fields and child not in (None, ""):
                     found = (_value_to_text(child), full_path)
                     return
                 visit(child, full_path)
@@ -735,6 +739,11 @@ def find_first_text_value(item: dict[str, Any], fields: list[str]) -> tuple[str 
 
     visit(item, "")
     return found
+
+
+def _canonical_field_name(value: str) -> str:
+    """Compare GLPI keys independent of case, hyphens, underscores, or spaces."""
+    return "".join(character for character in value.casefold() if character.isalnum())
 
 
 def _get_path(item: Any, path: str) -> Any:
