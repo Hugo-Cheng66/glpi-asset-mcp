@@ -45,14 +45,24 @@ def claim_report_download(filename: str, token: str) -> Path | None:
 
 def cleanup_expired_reports(reports_dir: Path) -> int:
     """Remove old generated reports, including reports from before a restart."""
-    reports_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        reports_dir.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        return 0
     ttl = max(60, int(os.environ.get("GLPI_REPORT_RETENTION_SECONDS", "86400")))
     cutoff = time.time() - ttl
     removed = 0
-    for path in reports_dir.iterdir():
-        if path.is_file() and path.suffix.lower() in {".csv", ".xlsx"} and path.stat().st_mtime < cutoff:
-            path.unlink(missing_ok=True)
-            removed += 1
+    try:
+        paths = list(reports_dir.iterdir())
+    except PermissionError:
+        return 0
+    for path in paths:
+        try:
+            if path.is_file() and path.suffix.lower() in {".csv", ".xlsx"} and path.stat().st_mtime < cutoff:
+                path.unlink(missing_ok=True)
+                removed += 1
+        except PermissionError:
+            continue
     return removed
 
 
@@ -61,7 +71,10 @@ def _purge_expired_locked() -> None:
     expired = [token for token, (_, expires_at) in _DOWNLOADS.items() if expires_at <= now]
     for token in expired:
         path, _ = _DOWNLOADS.pop(token)
-        path.unlink(missing_ok=True)
+        try:
+            path.unlink(missing_ok=True)
+        except PermissionError:
+            pass
 
 
 DEFAULT_COLUMNS = [
