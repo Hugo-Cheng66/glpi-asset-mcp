@@ -193,11 +193,12 @@ TOOLS = [
     },
     {
         "name": "glpi_agent_list",
-        "description": "List GLPI Agent computers with hostname, IP, OS, agent version, last inventory time, and health status. Use this for requests such as 'GLPI agent list'.",
+        "description": "List GLPI Agent computers with hostname, IP, OS, agent version, last inventory time, and health status. Use this tool alone for Agent version questions; agent_version=1.17 matches GLPI-Agent_v1.17-1, 1.17-1, and 1.17. Do not use software_inventory_query for Agent version filtering.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "query": {"type": "string", "description": "Optional filter across hostname, IP, OS, version, and status."},
+                "agent_version": {"type": "string", "description": "Optional Agent version filter. Matches the version portion, for example 1.17 matches GLPI-Agent_v1.17-1 and 1.17."},
                 "stale_days": {"type": "integer", "minimum": 1, "maximum": 3650, "default": 30},
                 "max_items": {"type": "integer", "minimum": 1, "maximum": 10000, "default": 3000},
                 "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
@@ -540,6 +541,12 @@ class McpServer:
         query = str(args.get("query") or "").casefold()
         if query:
             agents = [agent for agent in agents if query in json.dumps(agent, ensure_ascii=False).casefold()]
+        version_query = str(args.get("agent_version") or "").casefold().strip()
+        if version_query:
+            agents = [
+                agent for agent in agents
+                if version_query in str(agent["agent_version"]).casefold()
+            ]
         total = len(agents)
         agents = agents[:int(args.get("limit", 100))]
         counts = {status: sum(agent["status"] == status for agent in agents) for status in ("active", "stale", "unknown")}
