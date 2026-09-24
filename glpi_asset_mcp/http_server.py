@@ -5,7 +5,11 @@ from typing import Annotated, Literal
 
 from mcp.server.mcpserver import MCPServer
 from pydantic import Field
+from starlette.background import BackgroundTask
+from starlette.requests import Request
+from starlette.responses import FileResponse, PlainTextResponse
 
+from .reports import claim_report_download, cleanup_expired_reports
 from .server import McpServer as ToolService
 
 
@@ -14,6 +18,21 @@ mcp = MCPServer(
     "glpi-asset-mcp",
     description="Read GLPI assets and generate inventory reports.",
 )
+
+
+@mcp.custom_route("/reports/{filename}", methods=["GET"], include_in_schema=False)
+async def download_report(request: Request) -> FileResponse | PlainTextResponse:
+    filename = request.path_params["filename"]
+    token = request.query_params.get("token", "")
+    path = claim_report_download(filename, token)
+    if path is None:
+        return PlainTextResponse("Report link is invalid, expired, or already used.", status_code=404)
+    return FileResponse(
+        path,
+        filename=path.name,
+        media_type="application/octet-stream",
+        background=BackgroundTask(path.unlink, missing_ok=True),
+    )
 
 
 @mcp.tool(description="Search GLPI computer assets. Use asset_type linux/windows/computer for VMs and servers.")
@@ -186,6 +205,7 @@ def main() -> None:
     host = os.environ.get("GLPI_MCP_HTTP_HOST", "0.0.0.0")
     port = int(os.environ.get("GLPI_MCP_HTTP_PORT", "8000"))
     path = os.environ.get("GLPI_MCP_HTTP_PATH", "/mcp")
+    cleanup_expired_reports(service.settings.reports_dir)
     try:
         mcp.run(
             transport="streamable-http",
