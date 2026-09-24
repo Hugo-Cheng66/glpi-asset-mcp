@@ -266,6 +266,26 @@ class GlpiClient:
             "rows": rows,
         }
 
+    def software_inventory(self, *, max_computers: int = 3000, os_family: str | None = None) -> dict[str, Any]:
+        rows: list[dict[str, Any]] = []
+        computers: list[dict[str, Any]] = []
+        for computer in self.iter_items("computer", max_items=max_computers):
+            computer_id = computer.get("id")
+            if not computer_id:
+                continue
+            detail = self.get_item("computer", int(computer_id), include_softwares=True)
+            merged = {**computer, **detail}
+            family = detect_os_family(merged)
+            if os_family and family != os_family:
+                continue
+            computers.append(merged)
+            rows.extend(extract_software_rows(merged))
+        return {
+            "computer_count": len(computers),
+            "software_row_count": len(rows),
+            "rows": rows,
+        }
+
     def agent_health_check(
         self,
         *,
