@@ -1,7 +1,7 @@
 import unittest
 
 from glpi_asset_mcp.glpi_client import detect_os_family, find_first_text_value, normalize_asset
-from glpi_asset_mcp.server import _asset_report_row, _discover_field_paths, _filter_normalized_assets
+from glpi_asset_mcp.server import _asset_report_row, _discover_field_paths, _filter_normalized_assets, _markdown_table
 
 
 SAMPLE = {
@@ -10,6 +10,7 @@ SAMPLE = {
     "serial": "ABC123",
     "locations_id": {"name": "Shanghai DC"},
     "operating_system": {"name": "Ubuntu Linux 24.04"},
+    "operatingsystemversions_id": {"name": "24.04"},
     "_networkports": [
         {"name": "eth0", "mac": "00:11:22:33:44:55", "ipaddress": "10.0.0.42", "speed": 1000}
     ],
@@ -27,6 +28,7 @@ class InventoryNormalizationTests(unittest.TestCase):
         asset = normalize_asset(SAMPLE)
         self.assertEqual("linux", detect_os_family(SAMPLE))
         self.assertEqual("Ubuntu Linux 24.04", asset["operating_system"])
+        self.assertEqual("24.04", asset["os_version"])
         self.assertEqual("10.0.0.42", asset["networks"][0]["ip"])
         self.assertEqual("00:11:22:33:44:55", asset["networks"][0]["mac"])
         self.assertEqual("102400", asset["storage"][0]["total"])
@@ -44,6 +46,13 @@ class InventoryNormalizationTests(unittest.TestCase):
         self.assertEqual("00:11:22:33:44:55", row["MAC addresses"])
         self.assertEqual(1, row["Software count"])
         self.assertIn("nginx", row["Software"])
+        self.assertEqual("Ubuntu Linux 24.04", row["Operating system"])
+        self.assertEqual("24.04", row["OS version"])
+
+    def test_markdown_report_preview(self) -> None:
+        markdown = _markdown_table([{"Name": "srv-01", "IP address": "10.0.0.1"}], ["Name", "IP address"])
+        self.assertIn("| Name | IP address |", markdown)
+        self.assertIn("| srv-01 | 10.0.0.1 |", markdown)
 
     def test_discovers_nested_field_paths(self) -> None:
         paths = _discover_field_paths(SAMPLE)
