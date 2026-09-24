@@ -265,10 +265,14 @@ TOOLS.extend([
     },
     {
         "name": "network_device_report",
-        "description": "Export network devices with model, location, IP, MAC, ports, and raw GLPI summary fields.",
+        "description": "Generate a network device inventory report in one call. Use this tool alone for requested network fields; do not call field catalog or per-device details first.",
         "inputSchema": {"type": "object", "properties": {
             "query": {"type": "string"}, "format": {"type": "string", "enum": ["csv", "xlsx"], "default": "xlsx"},
             "max_items": {"type": "integer", "minimum": 1, "maximum": 10000, "default": 3000},
+            "fields": {"type": "array", "items": {"type": "string", "enum": [
+                "name", "serial_number", "hostname", "ip_address", "mac_address", "manufacturer",
+                "model", "location", "status", "asset_tag", "network_ports", "updated"
+            ]}},
         }},
     },
     {
@@ -636,8 +640,32 @@ class McpServer:
         if query:
             assets = [asset for asset in assets if query in json.dumps(asset, ensure_ascii=False).casefold()]
         rows = [_asset_report_row(asset) for asset in assets]
-        report = generate_report(rows, self.settings.reports_dir, report_type="network-devices", file_format=args.get("format", "xlsx"))
-        return {"matches": len(rows), "preview": rows[:20], "report": report}
+        field_columns = {
+            "name": "Name", "serial_number": "Serial number", "hostname": "Hostname",
+            "ip_address": "IP address", "mac_address": "MAC address",
+            "manufacturer": "Manufacturer", "model": "Model", "location": "Location",
+            "status": "Status", "asset_tag": "Asset tag", "network_ports": "Network ports",
+            "updated": "Updated",
+        }
+        requested_fields = args.get("fields") or [
+            "name", "serial_number", "hostname", "ip_address", "mac_address",
+            "manufacturer", "model", "location", "status", "network_ports",
+        ]
+        unknown_fields = [field for field in requested_fields if field not in field_columns]
+        if unknown_fields:
+            raise ValueError(f"Unsupported network report fields: {', '.join(unknown_fields)}")
+        columns = [field_columns[field] for field in requested_fields]
+        projected_rows = [{column: row.get(column, "") for column in columns} for row in rows]
+        report = generate_report(
+            projected_rows, self.settings.reports_dir, report_type="network-devices",
+            file_format=args.get("format", "xlsx"), columns=columns,
+        )
+        preview = projected_rows[:20]
+        return {
+            "matches": len(projected_rows), "returned": len(projected_rows), "fields": requested_fields,
+            "preview": preview, "markdown_preview": _markdown_table(preview, columns), "report": report,
+            "instruction": "Present markdown_preview and the generated file path. Do not call other tools.",
+        }
 
     def asset_field_catalog(self, args: dict[str, Any]) -> dict[str, Any]:
         asset_type = str(args.get("asset_type", "computer"))
