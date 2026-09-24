@@ -2,45 +2,11 @@ from __future__ import annotations
 
 import csv
 import os
-import secrets
-import threading
 import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-
-
-_DOWNLOADS: dict[str, tuple[Path, float]] = {}
-_DOWNLOADS_LOCK = threading.Lock()
-
-
-def register_report_download(path: Path) -> dict[str, str | int]:
-    """Create a one-time download URL for a generated report."""
-    token = secrets.token_urlsafe(32)
-    ttl = max(60, int(os.environ.get("GLPI_REPORT_RETENTION_SECONDS", "86400")))
-    expires_at = time.time() + ttl
-    with _DOWNLOADS_LOCK:
-        _purge_expired_locked()
-        _DOWNLOADS[token] = (path.resolve(), expires_at)
-    base_url = os.environ.get("GLPI_MCP_PUBLIC_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
-    return {
-        "download_url": f"{base_url}/reports/{path.name}?token={token}",
-        "download_expires_in_seconds": ttl,
-    }
-
-
-def claim_report_download(filename: str, token: str) -> Path | None:
-    """Consume a valid one-time report token and return its file path."""
-    with _DOWNLOADS_LOCK:
-        _purge_expired_locked()
-        record = _DOWNLOADS.pop(token, None)
-    if not record:
-        return None
-    path, expires_at = record
-    if path.name != filename or expires_at <= time.time() or not path.is_file():
-        return None
-    return path
 
 
 def cleanup_expired_reports(reports_dir: Path) -> int:
@@ -64,17 +30,6 @@ def cleanup_expired_reports(reports_dir: Path) -> int:
         except PermissionError:
             continue
     return removed
-
-
-def _purge_expired_locked() -> None:
-    now = time.time()
-    expired = [token for token, (_, expires_at) in _DOWNLOADS.items() if expires_at <= now]
-    for token in expired:
-        path, _ = _DOWNLOADS.pop(token)
-        try:
-            path.unlink(missing_ok=True)
-        except PermissionError:
-            pass
 
 
 DEFAULT_COLUMNS = [
@@ -102,6 +57,7 @@ def generate_report(
     file_format: str,
     columns: list[str] | None = None,
 ) -> dict[str, Any]:
+    cleanup_expired_reports(reports_dir)
     reports_dir.mkdir(parents=True, exist_ok=True)
     safe_type = "".join(ch for ch in report_type if ch.isalnum() or ch in ("-", "_")).strip("_") or "assets"
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -117,14 +73,16 @@ def generate_report(
     else:
         raise ValueError("file_format must be csv or xlsx")
 
-    download = register_report_download(path)
+    host_reports_dir = os.environ.get("GLPI_REPORTS_HOST_PATH", "").rstrip("/")
+    host_path = f"{host_reports_dir}/{path.name}" if host_reports_dir else ""
     return {
         "report_id": report_id,
         "format": file_format,
         "path": str(path),
         "rows": len(items),
         "columns": selected_columns,
-        **download,
+        "host_path": host_path,
+        "retrieval_hint": "Retrieve this file from the reports directory on the MCP host.",
     }
 
 
