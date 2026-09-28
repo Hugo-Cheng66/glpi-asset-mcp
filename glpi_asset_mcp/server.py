@@ -12,6 +12,7 @@ from .glpi_client import (
     DEFAULT_AGENT_DATE_FIELDS,
     DEFAULT_AGENT_VERSION_FIELDS,
     GlpiClient,
+    extract_software_rows,
     find_first_date_value,
     find_first_text_value,
     normalize_asset,
@@ -629,19 +630,35 @@ class McpServer:
         assets = [normalize_asset(item) for item in items]
         if args.get("os_family"):
             assets = [asset for asset in assets if asset["os_family"] == args["os_family"]]
+        asset_by_id = {asset.get("id"): asset for asset in assets}
         computer_query = str(args.get("computer_query") or "").casefold()
         software_query = str(args.get("query") or "").casefold()
         rows: list[dict[str, Any]] = []
-        for asset in assets:
+        for raw_item in items:
+            asset = asset_by_id.get(raw_item.get("id"))
+            if not asset:
+                continue
             if computer_query and computer_query not in json.dumps(asset, ensure_ascii=False).casefold():
                 continue
-            for software in asset["software"]:
+            software_rows = asset["software"] or extract_software_rows(raw_item)
+            for software in software_rows:
                 if software_query and software_query not in json.dumps(software, ensure_ascii=False).casefold():
                     continue
                 rows.append({"Computer ID": asset["id"], "Computer": asset["name"], "OS family": asset["os_family"], **software})
         total = len(rows)
         rows = rows[:int(args.get("limit", 500))]
-        return {"total_matches": total, "returned": len(rows), "items": rows}
+        matched_computers = sorted({row["Computer"] for row in rows})
+        return {
+            "query": args.get("query"),
+            "computer_query": args.get("computer_query"),
+            "searched_computers": len(items),
+            "matched_computers": matched_computers,
+            "total_matches": total,
+            "returned": len(rows),
+            "items": rows,
+            "no_matches": total == 0,
+            "message": "No matching software was found in the scanned GLPI inventory. Do not retry with package-name variants." if total == 0 else "Authoritative GLPI software matches returned.",
+        }
 
     def asset_inventory_report(self, args: dict[str, Any]) -> dict[str, Any]:
         query_args = {**args, "limit": int(args.get("max_items", 3000))}
