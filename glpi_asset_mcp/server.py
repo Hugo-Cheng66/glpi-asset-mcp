@@ -5,6 +5,7 @@ import sys
 import traceback
 from collections.abc import Callable
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from .config import Settings
@@ -442,10 +443,13 @@ class McpServer:
         if query:
             rows = [row for row in rows if query in json.dumps(row, ensure_ascii=False).casefold()]
         columns = ["Display name", "Version", "Discovery model", "Installed on", "Updated"]
-        report = generate_report(
-            rows, self.settings.reports_dir, report_type="software-inventory",
-            file_format=args.get("format", "xlsx"), columns=columns,
-        )
+        try:
+            report = generate_report(
+                rows, self.settings.reports_dir, report_type="software-inventory",
+                file_format=args.get("format", "xlsx"), columns=columns,
+            )
+        except Exception as exc:
+            return _report_generation_error(self.settings.reports_dir, exc)
         preview = rows[:20]
         return {
             "computer_count": inventory["computer_count"],
@@ -679,10 +683,13 @@ class McpServer:
             raise ValueError(f"Unsupported report fields: {', '.join(unknown_fields)}")
         columns = [field_columns[field] for field in requested_fields]
         projected_rows = [{column: row.get(column, "") for column in columns} for row in rows]
-        report = generate_report(
-            projected_rows, self.settings.reports_dir, report_type="asset-inventory",
-            file_format=args.get("format", "xlsx"), columns=columns,
-        )
+        try:
+            report = generate_report(
+                projected_rows, self.settings.reports_dir, report_type="asset-inventory",
+                file_format=args.get("format", "xlsx"), columns=columns,
+            )
+        except Exception as exc:
+            return _report_generation_error(self.settings.reports_dir, exc)
         preview = projected_rows[:20]
         return {
             "matches": result["total_matches"], "returned": len(projected_rows), "fields": requested_fields,
@@ -714,10 +721,13 @@ class McpServer:
             raise ValueError(f"Unsupported network report fields: {', '.join(unknown_fields)}")
         columns = [field_columns[field] for field in requested_fields]
         projected_rows = [{column: row.get(column, "") for column in columns} for row in rows]
-        report = generate_report(
-            projected_rows, self.settings.reports_dir, report_type="network-devices",
-            file_format=args.get("format", "xlsx"), columns=columns,
-        )
+        try:
+            report = generate_report(
+                projected_rows, self.settings.reports_dir, report_type="network-devices",
+                file_format=args.get("format", "xlsx"), columns=columns,
+            )
+        except Exception as exc:
+            return _report_generation_error(self.settings.reports_dir, exc)
         preview = projected_rows[:20]
         return {
             "matches": len(projected_rows), "returned": len(projected_rows), "fields": requested_fields,
@@ -741,7 +751,21 @@ class McpServer:
         return {"jsonrpc": "2.0", "id": request_id, "error": {"code": code, "message": message}}
 
 
-def _filter_normalized_assets(assets: list[dict[str, Any]], args: dict[str, Any]) -> list[dict[str, Any]]:
+def _report_generation_error(reports_dir: Path, exc: Exception) -> dict[str, Any]:
+    """Return a terminal, actionable result instead of making the model retry."""
+    return {
+        "ok": False,
+        "error_code": "REPORT_GENERATION_FAILED",
+        "error": str(exc),
+        "report_directory": str(reports_dir),
+        "instruction": (
+            "Stop. Do not retry this report tool or call another report tool. "
+            "Ask the administrator to make the report directory writable and then retry once."
+        ),
+    }
+
+
+def _filter_normalized_assets(assets: list[dict[str, Any]], args: dict[str, Any]) -> list[str]:
     result: list[dict[str, Any]] = []
     for asset in assets:
         if args.get("os_family") and asset["os_family"] != args["os_family"]:
