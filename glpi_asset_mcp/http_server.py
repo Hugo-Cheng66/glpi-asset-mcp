@@ -56,7 +56,7 @@ def asset_full_details(
     return service.asset_full_details(locals())
 
 
-@mcp.tool(description="Search installed software inline for a small result set. Default limit is 100; for complete data use software_inventory_report.")
+@mcp.tool(description="Search installed software inline with one deterministic call. Set query to a software name such as php; the result includes matched_computers and no_matches. If no_matches=true, report no match and do not retry with package-name variants. Default limit is 100; for a file use software_inventory_report.")
 def software_inventory_query(
     query: str | None = None,
     computer_query: str | None = None,
