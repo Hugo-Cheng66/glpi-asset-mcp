@@ -765,7 +765,7 @@ def _report_generation_error(reports_dir: Path, exc: Exception) -> dict[str, Any
     }
 
 
-def _filter_normalized_assets(assets: list[dict[str, Any]], args: dict[str, Any]) -> list[str]:
+def _filter_normalized_assets(assets: list[dict[str, Any]], args: dict[str, Any]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for asset in assets:
         if args.get("os_family") and asset["os_family"] != args["os_family"]:
